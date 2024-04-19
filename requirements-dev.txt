@@ -1,0 +1,7 @@
+black
+isort
+pytest
+pylance
+pylint
+
+-r app/requirements.txt

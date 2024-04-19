@@ -1,0 +1,55 @@
+{
+    "name": "Tigo CCA Proxy",
+    "image": "ghcr.io/home-assistant/devcontainer:addons",
+    "appPort": [
+        "7123:8123",
+        "7357:4357"
+    ],
+    "postStartCommand": "bash devcontainer_bootstrap && pip install -r requirements-dev.txt",
+    "runArgs": [
+        "-e",
+        "GIT_EDITOR=code --wait",
+        "--privileged"
+    ],
+    "containerEnv": {
+        "WORKSPACE_DIRECTORY": "${containerWorkspaceFolder}"
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "timonwong.shellcheck",
+                "esbenp.prettier-vscode",
+                "ms-python.python",
+                "ms-python.black-formatter",
+                "ms-python.isort",
+                "ms-python.pylint",
+                "ms-python.vscode-pylance",
+                "github.vscode-github-actions",
+                "GitHub.remotehub",
+                "donjayamanne.git-extension-pack",
+                "redhat.vscode-yaml",
+                "shyykoserhiy.git-autoconfig",
+                "GitHub.vscode-pull-request-github",
+                "ms-azuretools.vscode-docker"
+            ],
+            "settings": {
+                "terminal.integrated.profiles.linux": {
+                    "zsh": {
+                        "path": "/usr/bin/zsh"
+                    }
+                },
+                "terminal.integrated.defaultProfile.linux": "zsh",
+                "editor.formatOnPaste": false,
+                "editor.formatOnSave": true,
+                "editor.formatOnType": true,
+                "files.trimTrailingWhitespace": true
+            }
+        }
+    },
+    "mounts": [
+        "type=volume,target=/var/lib/docker"
+    ],
+    "features": {
+        "ghcr.io/devcontainers/features/python": "latest"
+    }
+}

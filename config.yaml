@@ -1,0 +1,25 @@
+name: "Tigo Proxy"
+description: "Proxy for Tigo CCA to allow solar panel data to be collected"
+version: "1.1.0"
+slug: tigo_proxy
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+startup: application
+# journald: true
+ports:
+  1234/tcp: 8888
+map:
+  - config
+options:
+  tigo_server: 127.0.0.1
+  tigo_port: 8888
+  max_read: 1024
+schema:
+  tigo_server: str
+  tigo_port: int
+  max_read: int

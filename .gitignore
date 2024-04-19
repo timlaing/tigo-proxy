@@ -1,0 +1,4 @@
+/.pytest_cache
+/.venv
+/cert.crt
+/cert.key
