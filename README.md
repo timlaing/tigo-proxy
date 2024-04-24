@@ -13,3 +13,17 @@ Allow the Tigo CCA traffic to proxied via Home Assistant to allow data collectio
 [armhf-shield]: https://img.shields.io/badge/armhf-yes-green.svg
 [armv7-shield]: https://img.shields.io/badge/armv7-yes-green.svg
 [i386-shield]: https://img.shields.io/badge/i386-yes-green.svg
+
+
+# Configuration of router to redirect packets to HA addon
+
+The Tigo CCA is hardcoded to use particalar IP address for reporting ("ds205.tigoenergy.com" == 64.62.250.194).
+
+As such we need to be able to redirect this traffic to this HA addon to inspect the data.
+
+This can be done using `iptables` with the following commands
+
+```bash
+iptables -t nat -I PREROUTING -p tcp -s <TigoCCA IP> -d 64.62.250.194 --dport 443 -j DNAT --to-destination <HA IP>:<AddonPort>
+iptables -t nat -I POSTROUTING -p tcp -d <HA IP> --dport <AddonPort> -j SNAT --to-source <Router IP>
+```

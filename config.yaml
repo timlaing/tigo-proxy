@@ -1,6 +1,6 @@
 name: "Tigo Proxy"
 description: "Proxy for Tigo CCA to allow solar panel data to be collected"
-version: "1.1.0"
+version: "1.2.0"
 slug: tigo_proxy
 init: false
 arch:
@@ -13,13 +13,17 @@ startup: application
 # journald: true
 ports:
   1234/tcp: 8888
+ports_description:
+  1234/tcp: "The port for Tigo CCA to connect"
 map:
-  - config
+  - homeassistant_config
 options:
-  tigo_server: 127.0.0.1
-  tigo_port: 8888
+  tigo_server: ds205.tigoenergy.com
+  tigo_port: 443
   max_read: 1024
 schema:
   tigo_server: str
   tigo_port: int
   max_read: int
+services:
+  - mqtt:need

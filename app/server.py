@@ -1,16 +1,23 @@
 """Tigo Proxy Server"""
 
 import asyncio
+import bz2
+import csv
+from functools import cached_property
 import io
 import json
 import logging
 import os
 import ssl
 import subprocess
+import urllib.parse
 from asyncio import StreamReader, StreamWriter
 from dataclasses import dataclass
-from http import client
 from http.server import BaseHTTPRequestHandler
+from xml.etree import ElementTree as ET
+import argparse
+import aiomqtt
+
 
 _LOGGER: logging.Logger = logging.getLogger()
 
@@ -23,28 +30,159 @@ class TigoProxyOptions:
     tigo_port: int
     max_read: int
 
+    mqtt_host: str
+    mqtt_user: str
+    mqtt_password: str
+    mqtt_port: int = 1883
+
+
+class TigoCsvDataProcessor:
+    """Class to handle the processing of the CSV data"""
+
+    def __init__(self, data: bytes) -> None:
+        self.reader = csv.DictReader(io.StringIO(data.decode("utf-8")), dialect="unix")
+
+
+class TigoPanelDataProcessor(TigoCsvDataProcessor):
+    """Class to handle the processing of the Panel data"""
+
+    PANELS: set[str] = set()
+
+    field_names: dict[str, dict] = {
+        "Vin": {
+            "device_class": "voltage",
+            "unit_of_measurement": "V",
+        },
+        "Iin": {
+            "device_class": "current",
+            "unit_of_measurement": "A",
+        },
+        "Temp": {
+            "device_class": "temperature",
+            "unit_of_measurement": "C",
+        },
+        "Pwm": {},
+        "Status": {},
+        "Flags": {},
+        "RSSI": {
+            "device_class": "signal_strength",
+        },
+        "BRSSI": {
+            "device_class": "signal_strength",
+        },
+        # "ID": {},
+        "Vout": {
+            "device_class": "voltage",
+            "unit_of_measurement": "V",
+        },
+        "Details": {},
+        "Pin": {
+            "device_class": "power",
+            "unit_of_measurement": "W",
+        },
+    }
+
+    panel_field_prefix: str = "LMU"
+
+    @cached_property
+    def panel_count(self) -> int:
+        """returns the number of panels"""
+        return len(self.panel_names)
+
+    @cached_property
+    def panel_names(self) -> list[str]:
+        """returns the number of panels"""
+        if self.reader.fieldnames:
+            return [
+                name.split("_")[1]
+                for name in self.reader.fieldnames
+                if name.endswith("_ID")
+            ]
+
+        return []
+
+    @cached_property
+    def panels(self) -> dict[str, dict[str, str | int | float]]:
+        """Data panel data as a dict"""
+        data: dict[str, dict] = {}
+        row: dict[str, str | int | float] = list(self.reader)[0]
+        for name in self.panel_names:
+            data[name] = {}
+            for field in self.field_names:
+                data[name][field] = row[f"{self.panel_field_prefix}_{name}_{field}"]
+
+        return data
+
+    def extra_fields(self, field_name: str) -> dict[str, str | int | float]:
+        """Extra configuration fields"""
+        return self.field_names[field_name]
+
+    async def publish(self, config: TigoProxyOptions) -> None:
+        """Publish the data via MQTT"""
+        panel_names_set: set = set(self.panel_names)
+
+        async with aiomqtt.Client(
+            hostname=config.mqtt_host,
+            port=config.mqtt_port,
+            username=config.mqtt_user,
+            password=config.mqtt_password,
+        ) as client:
+
+            if set(self.panel_names) != self.PANELS:
+                # perform discovery update
+                for panel_name in self.PANELS.difference(panel_names_set):
+                    for field in self.field_names:
+                        await client.publish(
+                            topic=f"homeassistant/sensor/tigo_mqtt/{panel_name}_{field}/config"
+                        )
+
+                for panel_name in panel_names_set.difference(self.PANELS):
+                    for field in self.field_names:
+                        await client.publish(
+                            topic=f"homeassistant/sensor/tigo_mqtt/{panel_name}_{field}/config",
+                            payload=json.dumps(
+                                {
+                                    "name": None,
+                                    "unqiue_id": f"tigo_{panel_name}_{field}",
+                                    "device": {
+                                        "identifiers": [f"tigo_{panel_name}"],
+                                        "name": panel_name,
+                                        "manufacturer": "Tigo",
+                                        "model": "TSO",
+                                    },
+                                    "state_topic": "homeassistant/sensor/tigo_mqtt/state",
+                                    "value_template": f"{{{{ value_json.{panel_name}.{field} }}}}",
+                                    **self.extra_fields(field),
+                                }
+                            ),
+                        )
+
+                self.PANELS = set(self.panel_names)
+
+            await client.publish(
+                topic="homeassistant/sensor/tigo_mqtt/state",
+                payload=json.dumps(self.panels),
+            )
+
 
 class TigoCCAServerProxy:
     """Class for Tigo CCA Server Proxy"""
 
     CERT_FILENAME = "/data/cert.crt"
     KEY_FILENAME = "/data/cert.key"
-    OPTIONS_FILENAME = "/data/options.json"
 
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(self, host: str, port: int, config: TigoProxyOptions) -> None:
 
         self.host: str = host
         self.port: int = port
-        if os.path.exists(self.OPTIONS_FILENAME):
-            with open(self.OPTIONS_FILENAME, encoding="utf-8") as f:
-                self.options = TigoProxyOptions(**json.load(f))
+        self.options: TigoProxyOptions = config
 
         if not os.path.exists(self.CERT_FILENAME) and not os.path.exists(
             self.KEY_FILENAME
         ):
             subprocess.run(
                 f"openssl req -new -x509 -days 365 -nodes -out {self.CERT_FILENAME} "
-                "-keyout {self.KEY_FILENAME} -batch",
+                f"-keyout {self.KEY_FILENAME} -batch",
                 shell=True,
                 check=False,
             )
@@ -60,9 +198,43 @@ class TigoCCAServerProxy:
 
     async def process_data(self, data: bytes) -> None:
         """Process the data from the connection"""
-        http_data = HTTPRequestParser(data=data)
-        print(http_data.command, http_data.request_version)
-        print(len(http_data.headers))
+        try:
+            http_data = HTTPRequestParser(data=data)
+            print(http_data.command, http_data.request_version, http_data.path)
+            url: urllib.parse.ParseResult = urllib.parse.urlparse(http_data.path)
+            qs: dict[str, list[str]] = urllib.parse.parse_qs(url.query)
+            for x in http_data.headers:
+                print(x, http_data.headers[x])
+            payload_data: bytes = bz2.decompress(http_data.rfile.read())
+            if "Source" in qs:
+                print(qs["Source"][0])
+            if "Type" in qs:
+                payload: str = payload_data.decode("utf-8")
+                match qs["Type"][0]:
+                    case "csv":
+                        # decode csv
+                        if "Source" in qs:
+                            match qs["Source"][0]:
+                                case "panels":
+                                    panel_data = TigoPanelDataProcessor(payload_data)
+                                    print(panel_data.panel_count)
+                                    print(panel_data.panel_names)
+                                    for panel in panel_data.panels.items():
+                                        print(panel)
+                                        break
+
+                                    await panel_data.publish(self.options)
+                                case _:
+                                    print(f"ignoring data {qs['Source'][0]}")
+                    case "xml":
+                        # decode xml
+                        xml: ET.Element = ET.fromstring(text=payload)
+                        for child in xml:
+                            print(child.tag, child.attrib, child.text)
+                    case _:
+                        print(f"unable to process data type {qs['Type'][0]}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            _LOGGER.error("exception during parsing of data: %s", exc)
 
     async def pass_data(
         self,
@@ -145,7 +317,7 @@ class TigoCCAServerProxy:
 class HTTPRequestParser(BaseHTTPRequestHandler):
     """Class to suport parsing of HTTP requests"""
 
-    def __init__(self, data: bytes) -> None:
+    def __init__(self, data: bytes) -> None:  # pylint: disable=super-init-not-called
         self.raw_data: bytes = data
         raw_lines: list[bytes] = self.raw_data.splitlines(keepends=True)
         self.rfile = io.BytesIO(b"".join(raw_lines[1:]))
@@ -156,16 +328,90 @@ class HTTPRequestParser(BaseHTTPRequestHandler):
         """Suppress errors"""
 
 
-async def setup_server(host, port) -> None:
+async def setup_server(host, port, config: TigoProxyOptions) -> None:
     """Setup the server with cert and key file"""
-    proxy = TigoCCAServerProxy(host, port)
+    proxy = TigoCCAServerProxy(host, port, config)
     await proxy.serve()
+
+
+def not_empty_string(arg: str) -> str:
+    """Verfies the value is not empty"""
+    if isinstance(arg, str) and len(arg) > 0:
+        return arg
+    raise argparse.ArgumentTypeError(f"value is not a valid string [{str}]")
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(setup_server("0.0.0.0", 1234))
-    # a = HTTPRequestParser(
-    #     data=b"GET / HTTP/1.1\r\nHost: localhost:1234\r\nUser-Agent: curl/8.4.0\r\nAccept: */*\r\n\r\n"
-    # )
-    # print(a)
+
+    parser = argparse.ArgumentParser("Tigo CCA HA Addon Proxy")
+    parser.add_argument(
+        "-s",
+        "--server",
+        type=str,
+        default="ds205.tigoenergy.com",
+        help="The Tigo remote server host",
+    )
+    parser.add_argument(
+        "-p",
+        "--port",
+        type=int,
+        default=443,
+        help="The Tigo remote server port",
+    )
+    parser.add_argument(
+        "-r",
+        "--maxread",
+        type=int,
+        default=1024,
+        help="The maximum socket read amount (bytes)",
+    )
+    parser.add_argument(
+        "-l",
+        "--listen",
+        type=int,
+        default=1234,
+        help="The local listen port",
+    )
+    parser.add_argument(
+        "--mqtt-host",
+        help="The MQTT host",
+        required=True,
+        type=not_empty_string,
+    )
+    parser.add_argument(
+        "--mqtt-port",
+        type=int,
+        help="The MQTT port number",
+        default=1883,
+        required=True,
+    )
+    parser.add_argument(
+        "--mqtt-user",
+        help="The MQTT username",
+        required=True,
+        type=not_empty_string,
+    )
+    parser.add_argument(
+        "--mqtt-password",
+        help="The MQTT password",
+        required=True,
+        type=not_empty_string,
+    )
+    args: argparse.Namespace = parser.parse_args()
+
+    asyncio.run(
+        setup_server(
+            "0.0.0.0",
+            args.listen,
+            TigoProxyOptions(
+                tigo_server=args.server,
+                tigo_port=args.port,
+                max_read=args.maxread,
+                mqtt_host=args.mqtt_host,
+                mqtt_port=args.mqtt_port,
+                mqtt_user=args.mqtt_user,
+                mqtt_password=args.mqtt_password,
+            ),
+        )
+    )

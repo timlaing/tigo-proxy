@@ -1,0 +1,10 @@
+configuration:
+  tigo_server:
+    name: Tigo CCA server host
+    description: The hostname/IP of the Tigo CCA web server.
+  tigo_port:
+    name: Tigo CCA server port
+    description: The port of the Tigo CCA web server.
+  max_read:
+    name: Socket max read
+    description: The maximum amount of data to read from a socket. Leave as the default.

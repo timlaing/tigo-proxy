@@ -5,7 +5,10 @@
         "7123:8123",
         "7357:4357"
     ],
-    "postStartCommand": "bash devcontainer_bootstrap && pip install -r requirements-dev.txt",
+    "forwardPorts": [
+        1234
+    ],
+    "postStartCommand": "bash devcontainer_bootstrap && sudo apt update && sudo apt install systemd-journal-remote -y && pip install -r requirements-dev.txt",
     "runArgs": [
         "-e",
         "GIT_EDITOR=code --wait",
@@ -42,12 +45,14 @@
                 "editor.formatOnPaste": false,
                 "editor.formatOnSave": true,
                 "editor.formatOnType": true,
-                "files.trimTrailingWhitespace": true
+                "files.trimTrailingWhitespace": true,
+                "remote.localPortHost": "allInterfaces"
             }
         }
     },
     "mounts": [
-        "type=volume,target=/var/lib/docker"
+        "type=volume,target=/var/lib/docker",
+        "type=bind,target=/data,source=${localWorkspaceFolder}/data"
     ],
     "features": {
         "ghcr.io/devcontainers/features/python": "latest"
