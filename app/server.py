@@ -177,15 +177,15 @@ class TigoCCAServerProxy:
         self.port: int = port
         self.options: TigoProxyOptions = config
 
-        if not os.path.exists(self.CERT_FILENAME) and not os.path.exists(
-            self.KEY_FILENAME
-        ):
-            subprocess.run(
-                f"openssl req -new -x509 -days 365 -nodes -out {self.CERT_FILENAME} "
-                f"-keyout {self.KEY_FILENAME} -batch",
-                shell=True,
-                check=False,
-            )
+        # if not os.path.exists(self.CERT_FILENAME) and not os.path.exists(
+        #     self.KEY_FILENAME
+        # ):
+        subprocess.run(
+            f"openssl req -new -x509 -days 3650 -nodes -out {self.CERT_FILENAME} "
+            f"-keyout {self.KEY_FILENAME} -batch",
+            shell=True,
+            check=False,
+        )
 
         self.ssl_ctx: ssl.SSLContext = ssl.create_default_context(
             purpose=ssl.Purpose.CLIENT_AUTH
