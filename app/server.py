@@ -141,8 +141,8 @@ class TigoPanelDataProcessor(TigoCsvDataProcessor):
                             topic=f"homeassistant/sensor/tigo_mqtt/{panel_name.lower()}_{field.lower()}/config",
                             payload=json.dumps(
                                 {
-                                    "name": None,
-                                    "unqiue_id": f"tigo_{panel_name}_{field}",
+                                    "name": f"{panel_name} - {field}",
+                                    "unqiue_id": f"tigo_{panel_name.lower()}_{field.lower()}",
                                     "device": {
                                         "identifiers": [f"tigo_{panel_name}"],
                                         "name": panel_name,
