@@ -1,22 +1,21 @@
 """Tigo Proxy Server"""
 
+import aiomqtt
+import argparse
 import asyncio
 import bz2
 import csv
-from functools import cached_property
 import io
 import json
 import logging
-import os
 import ssl
 import subprocess
 import urllib.parse
 from asyncio import StreamReader, StreamWriter
 from dataclasses import dataclass
+from functools import cached_property
 from http.server import BaseHTTPRequestHandler
 from xml.etree import ElementTree as ET
-import argparse
-import aiomqtt
 
 
 _LOGGER: logging.Logger = logging.getLogger()
@@ -200,14 +199,19 @@ class TigoCCAServerProxy:
         """Process the data from the connection"""
         try:
             http_data = HTTPRequestParser(data=data)
-            print(http_data.command, http_data.request_version, http_data.path)
+            _LOGGER.debug(
+                "HTTP request: %s %s %s",
+                http_data.command,
+                http_data.request_version,
+                http_data.path,
+            )
             url: urllib.parse.ParseResult = urllib.parse.urlparse(http_data.path)
             qs: dict[str, list[str]] = urllib.parse.parse_qs(url.query)
             for x in http_data.headers:
-                print(x, http_data.headers[x])
+                _LOGGER.debug("HTTP header: %s=%s", x, http_data.headers[x])
             payload_data: bytes = bz2.decompress(http_data.rfile.read())
             if "Source" in qs:
-                print(qs["Source"][0])
+                _LOGGER.debug("Source: %s", qs["Source"][0])
             if "Type" in qs:
                 payload: str = payload_data.decode("utf-8")
                 match qs["Type"][0]:
@@ -217,22 +221,33 @@ class TigoCCAServerProxy:
                             match qs["Source"][0]:
                                 case "panels":
                                     panel_data = TigoPanelDataProcessor(payload_data)
-                                    print(panel_data.panel_count)
-                                    print(panel_data.panel_names)
+                                    _LOGGER.debug(
+                                        "Panel Count: %d", panel_data.panel_count
+                                    )
+                                    _LOGGER.debug(
+                                        "Panel Names: %s", panel_data.panel_names
+                                    )
                                     for panel in panel_data.panels.items():
-                                        print(panel)
+                                        _LOGGER.debug("Panel[0] data: %s", panel)
                                         break
 
                                     await panel_data.publish(self.options)
                                 case _:
-                                    print(f"ignoring data {qs['Source'][0]}")
+                                    _LOGGER.info(
+                                        "Ignoring data for source: %s", qs["Source"][0]
+                                    )
                     case "xml":
                         # decode xml
                         xml: ET.Element = ET.fromstring(text=payload)
                         for child in xml:
-                            print(child.tag, child.attrib, child.text)
+                            _LOGGER.debug(
+                                "XML Info: %s %s %s",
+                                child.tag,
+                                child.attrib,
+                                child.text,
+                            )
                     case _:
-                        print(f"unable to process data type {qs['Type'][0]}")
+                        _LOGGER.info("Unable to process data type: %s", qs["Type"][0])
         except Exception as exc:  # pylint: disable=broad-exception-caught
             _LOGGER.error("exception during parsing of data: %s", exc)
 
@@ -342,7 +357,7 @@ def not_empty_string(arg: str) -> str:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
 
     parser = argparse.ArgumentParser("Tigo CCA HA Addon Proxy")
     parser.add_argument(
