@@ -132,13 +132,13 @@ class TigoPanelDataProcessor(TigoCsvDataProcessor):
                 for panel_name in self.PANELS.difference(panel_names_set):
                     for field in self.field_names:
                         await client.publish(
-                            topic=f"homeassistant/sensor/tigo_mqtt/{panel_name}_{field}/config"
+                            topic=f"homeassistant/sensor/tigo_mqtt/{panel_name.lower()}_{field.lower()}/config"
                         )
 
                 for panel_name in panel_names_set.difference(self.PANELS):
                     for field in self.field_names:
                         await client.publish(
-                            topic=f"homeassistant/sensor/tigo_mqtt/{panel_name}_{field}/config",
+                            topic=f"homeassistant/sensor/tigo_mqtt/{panel_name.lower()}_{field.lower()}/config",
                             payload=json.dumps(
                                 {
                                     "name": None,
@@ -221,19 +221,19 @@ class TigoCCAServerProxy:
                             match qs["Source"][0]:
                                 case "panels":
                                     panel_data = TigoPanelDataProcessor(payload_data)
-                                    _LOGGER.debug(
+                                    _LOGGER.info(
                                         "Panel Count: %d", panel_data.panel_count
                                     )
-                                    _LOGGER.debug(
+                                    _LOGGER.info(
                                         "Panel Names: %s", panel_data.panel_names
                                     )
                                     for panel in panel_data.panels.items():
-                                        _LOGGER.debug("Panel[0] data: %s", panel)
+                                        _LOGGER.info("Panel[0] data: %s", panel)
                                         break
 
                                     await panel_data.publish(self.options)
                                 case _:
-                                    _LOGGER.info(
+                                    _LOGGER.debug(
                                         "Ignoring data for source: %s", qs["Source"][0]
                                     )
                     case "xml":
@@ -247,7 +247,7 @@ class TigoCCAServerProxy:
                                 child.text,
                             )
                     case _:
-                        _LOGGER.info("Unable to process data type: %s", qs["Type"][0])
+                        _LOGGER.debug("Unable to process data type: %s", qs["Type"][0])
         except Exception as exc:  # pylint: disable=broad-exception-caught
             _LOGGER.error("exception during parsing of data: %s", exc)
 
