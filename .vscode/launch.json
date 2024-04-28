@@ -11,6 +11,20 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false
+        },
+        {
+            "name": "Python Debugger: Server.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "app/server.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--mqtt-host=127.0.0.1",
+                "--mqtt-port=1111",
+                "--mqtt-user=1",
+                "--mqtt-password=1"
+            ]
         }
     ]
 }

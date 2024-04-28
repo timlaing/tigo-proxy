@@ -1,6 +1,5 @@
 """Tigo Proxy Server"""
 
-import aiomqtt
 import argparse
 import asyncio
 import bz2
@@ -17,6 +16,7 @@ from functools import cached_property
 from http.server import BaseHTTPRequestHandler
 from xml.etree import ElementTree as ET
 
+import aiomqtt
 
 _LOGGER: logging.Logger = logging.getLogger()
 
@@ -38,14 +38,15 @@ class TigoProxyOptions:
 class TigoCsvDataProcessor:
     """Class to handle the processing of the CSV data"""
 
-    def __init__(self, data: bytes) -> None:
+    def __init__(self, data: bytes, peer: tuple) -> None:
+        self.peer: tuple = peer
         self.reader = csv.DictReader(io.StringIO(data.decode("utf-8")), dialect="unix")
 
 
 class TigoPanelDataProcessor(TigoCsvDataProcessor):
     """Class to handle the processing of the Panel data"""
 
-    PANELS: set[str] = set()
+    panel_name_cache: set[str] = set()
 
     field_names: dict[str, dict] = {
         "Vin": {
@@ -60,21 +61,31 @@ class TigoPanelDataProcessor(TigoCsvDataProcessor):
             "device_class": "temperature",
             "unit_of_measurement": "C",
         },
-        "Pwm": {},
-        "Status": {},
-        "Flags": {},
+        "Pwm": {
+            "entity_category": "diagnostic",
+        },
+        "Status": {
+            "entity_category": "diagnostic",
+        },
+        "Flags": {
+            "entity_category": "diagnostic",
+        },
         "RSSI": {
             "device_class": "signal_strength",
+            "entity_category": "diagnostic",
         },
         "BRSSI": {
             "device_class": "signal_strength",
+            "entity_category": "diagnostic",
         },
         # "ID": {},
         "Vout": {
             "device_class": "voltage",
             "unit_of_measurement": "V",
         },
-        "Details": {},
+        "Details": {
+            "entity_category": "diagnostic",
+        },
         "Pin": {
             "device_class": "power",
             "unit_of_measurement": "W",
@@ -127,36 +138,41 @@ class TigoPanelDataProcessor(TigoCsvDataProcessor):
             password=config.mqtt_password,
         ) as client:
 
-            if set(self.panel_names) != self.PANELS:
+            if set(self.panel_names) != self.panel_name_cache:
                 # perform discovery update
-                for panel_name in self.PANELS.difference(panel_names_set):
+                for panel_name in self.panel_name_cache.difference(panel_names_set):
                     for field in self.field_names:
                         await client.publish(
-                            topic=f"homeassistant/sensor/tigo_mqtt/{panel_name.lower()}_{field.lower()}/config"
+                            topic="homeassistant/sensor/tigo_mqtt/"
+                            f"{panel_name.lower()}_{field.lower()}/config"
                         )
 
-                for panel_name in panel_names_set.difference(self.PANELS):
+                for panel_name in panel_names_set.difference(self.panel_name_cache):
                     for field in self.field_names:
+                        data: dict[str, str | int | float | dict] = {
+                            "name": f"{panel_name} - {field}",
+                            "unqiue_id": f"tigo_{panel_name.lower()}_{field.lower()}",
+                            "device": {
+                                "identifiers": [f"tigo_{panel_name.lower()}"],
+                                "name": panel_name,
+                                "manufacturer": "Tigo",
+                                "model": "TS4-A-O",
+                                "via_device": f"{self.peer[0]}",
+                            },
+                            "state_topic": "homeassistant/sensor/tigo_mqtt/state",
+                            "value_template": f"{{{{ value_json.{panel_name}.{field} }}}}",
+                            "json_attributes_topic": "homeassistant/sensor/tigo_mqtt/state",
+                            "json_attributes_template": f"{{{{ value_json.{panel_name}|tojson }}}}",
+                            **self.extra_fields(field),
+                        }
+
                         await client.publish(
-                            topic=f"homeassistant/sensor/tigo_mqtt/{panel_name.lower()}_{field.lower()}/config",
-                            payload=json.dumps(
-                                {
-                                    "name": f"{panel_name} - {field}",
-                                    "unqiue_id": f"tigo_{panel_name.lower()}_{field.lower()}",
-                                    "device": {
-                                        "identifiers": [f"tigo_{panel_name}"],
-                                        "name": panel_name,
-                                        "manufacturer": "Tigo",
-                                        "model": "TSO",
-                                    },
-                                    "state_topic": "homeassistant/sensor/tigo_mqtt/state",
-                                    "value_template": f"{{{{ value_json.{panel_name}.{field} }}}}",
-                                    **self.extra_fields(field),
-                                }
-                            ),
+                            topic="homeassistant/sensor/tigo_mqtt/"
+                            f"{panel_name.lower()}_{field.lower()}/config",
+                            payload=json.dumps(data),
                         )
 
-                self.PANELS = set(self.panel_names)
+                self.panel_name_cache = set(self.panel_names)
 
             await client.publish(
                 topic="homeassistant/sensor/tigo_mqtt/state",
@@ -195,7 +211,7 @@ class TigoCCAServerProxy:
         )
         self.server: asyncio.Server | None = None
 
-    async def process_data(self, data: bytes) -> None:
+    async def process_data(self, data: bytes, peer: tuple) -> None:
         """Process the data from the connection"""
         try:
             http_data = HTTPRequestParser(data=data)
@@ -220,7 +236,9 @@ class TigoCCAServerProxy:
                         if "Source" in qs:
                             match qs["Source"][0]:
                                 case "panels":
-                                    panel_data = TigoPanelDataProcessor(payload_data)
+                                    panel_data = TigoPanelDataProcessor(
+                                        payload_data, peer
+                                    )
                                     _LOGGER.info(
                                         "Panel Count: %d", panel_data.panel_count
                                     )
@@ -257,7 +275,8 @@ class TigoCCAServerProxy:
         reader: StreamReader,
         writer: StreamWriter,
         *,
-        process=False,
+        peer: tuple | None = None,
+        process: bool = False,
     ) -> None:
         """Sends data from reader to writer"""
         connection_data: bytes = b""
@@ -278,7 +297,7 @@ class TigoCCAServerProxy:
         writer.close()
         await writer.wait_closed()
         if process:
-            await self.process_data(connection_data)
+            await self.process_data(connection_data, peer)
 
     async def handle_connection(
         self, c_reader: StreamReader, c_writer: StreamWriter
@@ -305,7 +324,7 @@ class TigoCCAServerProxy:
             return
 
         await asyncio.gather(
-            self.pass_data(">> ", c_reader, s_writer, process=True),
+            self.pass_data(">> ", c_reader, s_writer, peer=addr, process=True),
             self.pass_data(
                 "<< ",
                 s_reader,
@@ -357,7 +376,11 @@ def not_empty_string(arg: str) -> str:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s %(message)s",
+        datefmt="%d/%m/%Y %H:%M:%S",
+    )
 
     parser = argparse.ArgumentParser("Tigo CCA HA Addon Proxy")
     parser.add_argument(
