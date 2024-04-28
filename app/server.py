@@ -59,7 +59,7 @@ class TigoPanelDataProcessor(TigoCsvDataProcessor):
         },
         "Temp": {
             "device_class": "temperature",
-            "unit_of_measurement": "C",
+            "unit_of_measurement": "°C",
         },
         "Pwm": {
             "entity_category": "diagnostic",
@@ -73,10 +73,12 @@ class TigoPanelDataProcessor(TigoCsvDataProcessor):
         "RSSI": {
             "device_class": "signal_strength",
             "entity_category": "diagnostic",
+            "unit_of_measurement": "dBm",
         },
         "BRSSI": {
             "device_class": "signal_strength",
             "entity_category": "diagnostic",
+            "unit_of_measurement": "dBm",
         },
         # "ID": {},
         "Vout": {
@@ -151,7 +153,7 @@ class TigoPanelDataProcessor(TigoCsvDataProcessor):
                     for field in self.field_names:
                         data: dict[str, str | int | float | dict] = {
                             "name": f"{field}",
-                            "unqiue_id": f"tigo/{panel_name.lower()}_{field.lower()}",
+                            "unqiue_id": f"tigo_mqtt_{panel_name.lower()}_{field.lower()}",
                             "device": {
                                 "identifiers": [f"tigo_{panel_name.lower()}"],
                                 "name": panel_name,
@@ -161,7 +163,7 @@ class TigoPanelDataProcessor(TigoCsvDataProcessor):
                             },
                             "origin": {
                                 "name": "Tigo Proxy",
-                                "sw_version": "2024.04.28-1",
+                                "sw_version": "2024.04.28-2",
                                 "support_url": "https://github.com/timlaing/tigo-proxy",
                             },
                             "state_topic": "homeassistant/sensor/tigo_mqtt/state",
@@ -232,7 +234,7 @@ class TigoCCAServerProxy:
                 _LOGGER.debug("HTTP header: %s=%s", x, http_data.headers[x])
             payload_data: bytes = bz2.decompress(http_data.rfile.read())
             if "Source" in qs:
-                _LOGGER.debug("Source: %s", qs["Source"][0])
+                _LOGGER.info("Source: %s", qs["Source"][0])
             if "Type" in qs:
                 payload: str = payload_data.decode("utf-8")
                 match qs["Type"][0]:
@@ -255,6 +257,14 @@ class TigoCCAServerProxy:
                                         break
 
                                     await panel_data.publish(self.options)
+                                case "Net_Routing":
+                                    d = TigoCsvDataProcessor(payload_data, peer)
+                                    row = list(d.reader)[0]
+                                    _LOGGER.info(row)
+                                case "panels_avg":
+                                    d = TigoCsvDataProcessor(payload_data, peer)
+                                    row = list(d.reader)[0]
+                                    _LOGGER.info(row)
                                 case _:
                                     _LOGGER.debug(
                                         "Ignoring data for source: %s", qs["Source"][0]

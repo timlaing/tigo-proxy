@@ -1,6 +1,6 @@
 name: "Tigo Proxy"
 description: "Proxy for Tigo CCA to allow solar panel data to be collected"
-version: "2024.04.28-1"
+version: "2024.04.28-2"
 slug: tigo_proxy
 init: false
 arch:
