@@ -150,14 +150,19 @@ class TigoPanelDataProcessor(TigoCsvDataProcessor):
                 for panel_name in panel_names_set.difference(self.panel_name_cache):
                     for field in self.field_names:
                         data: dict[str, str | int | float | dict] = {
-                            "name": f"{panel_name} - {field}",
-                            "unqiue_id": f"tigo_{panel_name.lower()}_{field.lower()}",
+                            "name": f"{field}",
+                            "unqiue_id": f"tigo/{panel_name.lower()}_{field.lower()}",
                             "device": {
                                 "identifiers": [f"tigo_{panel_name.lower()}"],
                                 "name": panel_name,
                                 "manufacturer": "Tigo",
                                 "model": "TS4-A-O",
                                 "via_device": f"{self.peer[0]}",
+                            },
+                            "origin": {
+                                "name": "Tigo Proxy",
+                                "sw_version": "2024.04.28-1",
+                                "support_url": "https://github.com/timlaing/tigo-proxy",
                             },
                             "state_topic": "homeassistant/sensor/tigo_mqtt/state",
                             "value_template": f"{{{{ value_json.{panel_name}.{field} }}}}",
