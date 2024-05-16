@@ -163,7 +163,7 @@ class TigoPanelDataProcessor(TigoCsvDataProcessor):
                             },
                             "origin": {
                                 "name": "Tigo Proxy",
-                                "sw_version": "2024.04.28-2",
+                                "sw_version": "2024.05.15-1",
                                 "support_url": "https://github.com/timlaing/tigo-proxy",
                             },
                             "state_topic": "homeassistant/sensor/tigo_mqtt/state",
@@ -218,8 +218,11 @@ class TigoCCAServerProxy:
         )
         self.server: asyncio.Server | None = None
 
-    async def process_data(self, data: bytes, peer: tuple) -> None:
+    async def process_data(self, data: bytes, peer: tuple | None) -> None:
         """Process the data from the connection"""
+        if not peer:
+            return
+
         try:
             http_data = HTTPRequestParser(data=data)
             _LOGGER.debug(
@@ -237,6 +240,7 @@ class TigoCCAServerProxy:
                 _LOGGER.info("Source: %s", qs["Source"][0])
             if "Type" in qs:
                 payload: str = payload_data.decode("utf-8")
+                _LOGGER.debug("Payload: %s", payload)
                 match qs["Type"][0]:
                     case "csv":
                         # decode csv
@@ -392,7 +396,7 @@ def not_empty_string(arg: str) -> str:
 
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format="%(asctime)s %(message)s",
         datefmt="%d/%m/%Y %H:%M:%S",
     )
